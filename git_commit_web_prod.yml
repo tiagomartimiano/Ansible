@@ -1,0 +1,39 @@
+---
+- hosts: localhost
+  gather_facts: false
+  become: yes
+  become_user: jenkins
+  name: "GIT UPDATE"
+  vars_files:
+    - vars/default.yml
+
+  tasks:
+    - name: "CLEANUP"
+      file: 
+        path: '/tmp/{{ path }}'
+        state: absent
+
+    - name: "GIT CLONE"
+      git:
+        repo: git@github.com:tiagomartimiano/Ansible.git
+        version: master
+        accept_hostkey: yes
+        force: yes
+        dest: /tmp/{{ path }}/
+        key_file: /var/lib/jenkins/.ssh/id_rsa
+
+    - name: "REPLACE IMAGE TAG"
+      replace:
+        dest: /tmp/{{ path }}/opsworks/{{ path }}/apps.yml
+        regexp: 'tiagomartimiano/web-{{ country }}:.*$'
+        replace: 'tiagomartimiano/web-{{ country }}:{{ docker_tag }}'
+
+    - name: "GIT ADD"
+      shell: cd /tmp/{{ path }}/ && git add opsworks/{{ path }}/apps.yml 
+
+    - name: "GIT COMMIT"
+      shell: cd /tmp/{{ path }}/ && git commit -m "{{ app_deploy }}"
+
+    - name: "GIT PUSH"
+      shell: cd /tmp/{{ path }}/ && git push origin master
+

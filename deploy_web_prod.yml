@@ -1,0 +1,68 @@
+---
+- hosts: "{{ opsworks_stack }}"
+  gather_facts: false
+  name: "{{ app_deploy }}"
+  serial: 1
+  become: yes
+  become_method: sudo
+  become_user: root
+  vars_files:
+    - vars/default.yml
+
+  tasks:
+    - name: "GET INSTANCEID"
+      uri:
+        url: http://xxx.xxx.xxx.xxx/latest/meta-data/instance-id
+        method: GET
+        return_content: yes
+      register: instanceid
+
+    - name: De-register EC2 "{{ instanceid.content }}" - ELB "{{name_elb}}"
+      ec2_elb:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region_aws }}"
+        ec2_elbs: "{{ name_elb }}"
+        instance_id: "{{ instanceid.content }}"
+        state: absent
+        wait: yes
+      delegate_to: localhost
+
+    - name: "CREATE DIRECTORY BIONEXO"
+      file: "path=/tiagomartimiano state=directory"
+
+    - name: "COPY DOCKER-COMPOSE"
+      template:
+        src: /tmp/{{ path }}/opsworks/{{ path }}/apps.yml
+        dest: /tiagomartimiano/docker-compose.yml
+        group: root
+        mode: 420
+        owner: root
+
+    - name: "RUNNING DOCKER-COMPOSE"
+      shell: "cd /tiagomartimiano/ && docker-compose pull && docker-compose kill && docker-compose rm --force && docker-compose -f /tiagomartimiano/docker-compose.yml up -d"
+
+    - name: "DOCKERSTATUS - HEALTHCHECK"
+      uri:
+        url: "http://localhost:8888"
+        method: GET
+        validate_certs: no
+        return_content: true
+      register: result
+      until: result.content.find("OK") != -1
+      retries: 60
+      delay: 5
+
+    - name: Register EC2 "{{ instanceid.content }}" - ELB "{{name_elb}}"
+      ec2_elb:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region_aws }}"
+        ec2_elbs: "{{ name_elb }}"
+        instance_id: "{{ instanceid.content }}"
+        state: present
+      register: elb_add
+      until: elb_add|success
+      retries: 12
+      delay: 10
+      delegate_to: localhost
